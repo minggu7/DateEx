@@ -1,70 +1,538 @@
-# Getting Started with Create React App
+// 날짜 범위 선택 컴포넌트(현재 사용중). 
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { format, eachDayOfInterval, startOfDay, addMonths, compareAsc, subMonths, isAfter, startOfDay as getStartOfDay, addDays, isBefore, subDays } from "date-fns";
+import styled from 'styled-components';
+import { useMediaQuery } from '@mui/material';
+import { Box, Tooltip } from '@mui/material';
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+// 캘린더 스타일
+const CalendarWrapper = styled.div`
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  align-items: start;
+  
+  @media (max-width: 768px) {
+    gap: 0;
+  }
+`;
 
-## Available Scripts
+// 캘린더 컨테이너 스타일
+const CalendarContainer = styled.div`
+  width: 100%;
+  max-width: 300px;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+`;
 
-In the project directory, you can run:
+// 캘린더 헤더 스타일
+const CalendarHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+`;
 
-### `npm start`
+// 월 버튼 스타일
+const MonthButton = styled.button`
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  &:hover {
+    background: #f0f0f0;
+  }
+`;
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+// 월 타이틀 스타일
+const MonthTitle = styled.span`
+  font-weight: 600;
+  font-size: 0.9rem;
+`;
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+// 요일 헤더 스타일
+const WeekdayHeader = styled.div`
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  border-bottom: 1px solid #eee;
+  padding: 0.25rem 0;
+  background: #f8f9fa;
+`;
 
-### `npm test`
+// 요일 셀 스타일
+const WeekdayCell = styled.div`
+  font-size: 0.75rem;
+  font-weight: 500;
+`;
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+// 날짜 그리드 스타일
+const DaysGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  background: #fff;
+  padding: 0.25rem;
+  grid-template-rows: repeat(6, 1fr);
+`;
 
-### `npm run build`
+// 날짜 셀 스타일
+const DayCell = styled.div`
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ${props => props.isDisabled ? 'not-allowed' : props.isEmpty ? 'default' : 'pointer'};
+  font-size: 0.8rem;
+  transition: background-color 0.2s;
+  user-select: none;
+  visibility: ${props => props.isEmpty ? 'hidden' : 'visible'};
+  background: ${props => {
+    if (props.isSelected) return '#3b82f6';
+    if (props.isInRange) return '#dbeafe';
+    return 'transparent';
+  }};
+  color: ${props => {
+    if (props.isDisabled) return '#ccc';
+    if (props.isSelected) return 'white';
+    return 'inherit';
+  }};
+  opacity: ${props => props.isDisabled ? 0.5 : 1};
+  padding: 0.25rem;
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+  &:hover {
+    background: ${props => {
+      if (props.isDisabled || props.isEmpty) return 'transparent';
+      if (props.isSelected) return '#2563eb';
+      if (props.isInRange) return '#bfdbfe';
+      return '#f3f4f6';
+    }};
+  }
+`;
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+// 캘린더 팝업 스타일
+const CalendarPopup = styled.div`
+  position: absolute;
+  z-index: 99999;
+  margin-top: 8px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  padding: 16px;
+  
+  // 검색 영역에서 잘리지 않도록 위치 조정
+  ${props => props.isSearchSection ? `
+    left: 0;  // 왼쪽 정렬
+    @media (max-width: 768px) {
+      left: -20px;  // 모바일에서는 약간 왼쪽으로 더 이동
+    }
+  ` : `
+    right: 0;  // 기존처럼 오른쪽 정렬 (SearchOptions 등에서 사용)
+    @media (max-width: 768px) {
+      right: auto;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+  `}
+`;
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+// 날짜 입력 스타일
+const DateInput = styled.div`
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  cursor: pointer;
+  background: white;
+  width: 260px;
+  font-size: 0.875rem;
+  color: ${props => props.hasValue ? '#1f2937' : '#9ca3af'};
+  &:hover {
+    border-color: #cbd5e1;
+  }
+`;
 
-### `npm run eject`
+// 버튼 컨테이너 스타일
+const ButtonContainer = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  padding: 1rem;
+  background: white;
+  border-top: 1px solid #eee;
+  margin: 0 -20px;
+`;
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+// 확인 버튼 스타일
+const ConfirmButton = styled.button`
+  padding: 8px 16px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  
+  &:hover {
+    background: #2563eb;
+  }
+`;
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+// 메인 코드. 받는값은 시작일 ,종료일, 변경된 시작일, 변경된 종료일
+const DateRangePicker = ({ startDate, endDate, onStartDateChange, onEndDateChange, isSearchSection }) => {
+  // 한국 시간 기준으로 today 설정
+  const today = useMemo(() => {
+    try {
+      return startOfDay(new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Seoul"})));
+    } catch (e) {
+      return startOfDay(new Date());
+    }
+  }, []);
+  
+  const todayFormatted = useMemo(() => {
+    try {
+      return format(today, "yyyy-MM-dd");
+    } catch (e) {
+      return format(new Date(), "yyyy-MM-dd");
+    }
+  }, [today]);
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+  const initialStartMonth = useMemo(() => {
+    try {
+      return subMonths(today, 1);
+    } catch (e) {
+      return subMonths(new Date(), 1);
+    }
+  }, [today]);
+  
+  const [currentStartMonth, setCurrentStartMonth] = useState(() => initialStartMonth);
+  const [currentEndMonth, setCurrentEndMonth] = useState(() => today);
+  const [selectedStartDate, setSelectedStartDate] = useState(() => todayFormatted);
+  const [selectedEndDate, setSelectedEndDate] = useState(() => todayFormatted);
+  const [tempStartDate, setTempStartDate] = useState(() => todayFormatted);
+  const [tempEndDate, setTempEndDate] = useState(() => todayFormatted);
+  const [hoverDate, setHoverDate] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const calendarRef = useRef(null);
+  const isMobile = useMediaQuery('(max-width:768px)');
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+  // 모든 Hooks를 최상단으로 이동
+  const sortDates = useCallback((date1, date2) => {
+    try {
+      if (!date1 || !date2) return [date1, date2];
+      const firstDate = new Date(date1);
+      const secondDate = new Date(date2);
+      return firstDate <= secondDate ? [date1, date2] : [date2, date1];
+    } catch (e) {
+      return [date1, date2];
+    }
+  }, []);
 
-## Learn More
+  // 범위 계산 함수
+  const getRange = useCallback((start, end) => {
+    try {
+      if (!start || !end) return [];
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      return eachDayOfInterval({
+        start: startOfDay(startDate),
+        end: startOfDay(endDate)
+      }).map(date => format(date, "yyyy-MM-dd"));
+    } catch (e) {
+      return [];
+    }
+  }, []);
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+  // 날짜 문자열을 Date 객체로 변환하는 헬퍼 함수
+  const parseDate = (dateString) => {
+    if (!dateString) return null;
+    try {
+      // YYYYMMDD 형식의 문자열을 Date 객체로 변환
+      const year = dateString.substring(0, 4);
+      const month = dateString.substring(4, 6);
+      const day = dateString.substring(6, 8);
+      return new Date(year, month - 1, day);
+    } catch (e) {
+      console.error('Date parsing error:', e);
+      return null;
+    }
+  };
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+  // 날짜 범위 포맷 함수
+  const formatDateRange = () => {
+    const formatDate = (dateString) => {
+      if (!dateString) return '';
+      const date = parseDate(dateString);
+      if (!date) return '';
+      try {
+        return format(date, 'yyyy-MM-dd');
+      } catch (e) {
+        console.error('Date formatting error:', e);
+        return '';
+      }
+    };
 
-### Code Splitting
+    if (!startDate && !endDate) return '기간 선택';
+    if (!endDate) return `${formatDate(startDate)} ~`;
+    if (!startDate) return `~ ${formatDate(endDate)}`;
+    return `${formatDate(startDate)} ~ ${formatDate(endDate)}`;
+  };
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+  // 초기값 설정
+  useEffect(() => {
+    if (!startDate && !endDate) {
+      try {
+        const displayToday = format(today, 'yyyyMMdd');
+        onStartDateChange(displayToday);
+        onEndDateChange(displayToday);
+        
+        console.log('DateRangePicker 초기값 설정');
+        console.log('시작일:', displayToday);
+        console.log('종료일:', displayToday);
+      } catch (e) {
+        console.error('Date initialization error:', e);
+      }
+    }
+  }, []);
 
-### Analyzing the Bundle Size
+  // 초기값 설정
+  useEffect(() => {
+    try {
+      if (!selectedStartDate || !selectedEndDate) {
+        setSelectedStartDate(todayFormatted);
+        setSelectedEndDate(todayFormatted);
+      }
+    } catch (e) {
+      console.error('Date initialization error:', e);
+    }
+  }, [todayFormatted, selectedStartDate, selectedEndDate]);
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+  // 캘린더 팝업 닫기
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isDragging) return;
+      if (calendarRef.current && !calendarRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
 
-### Making a Progressive Web App
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDragging]);
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+  if (!currentStartMonth || !currentEndMonth || !todayFormatted) {
+    return null;
+  }
 
-### Advanced Configuration
+  const handleDateSelection = (formatted) => {
+    const selectedDate = new Date(formatted);
+    // 한국 시간 기준으로 tomorrow 설정
+    const tomorrow = startOfDay(addDays(new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Seoul"})), 1));
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+    // 내일 이후 날짜만 제한
+    if (!isBefore(selectedDate, tomorrow)) {
+      return;
+    }
 
-### Deployment
+    // 드래그 중이 아닐 때의 클릭 이벤트
+    if (!isDragging) {
+      // 이미 선택된 날짜 클릭 시 초기화
+      if (formatted === tempStartDate || formatted === tempEndDate) {
+        setTempStartDate(null);
+        setTempEndDate(null);
+        return;
+      }
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+      // 첫 번째 선택
+      if (!tempStartDate && !tempEndDate) {
+        setTempStartDate(formatted);
+        setTempEndDate(null);
+        return;
+      }
 
-### `npm run build` fails to minify
+      // 두 번째 선택 - 순서 상관없이 범위 설정
+      const [start, end] = sortDates(tempStartDate, formatted);
+      setTempStartDate(start);
+      setTempEndDate(end);
+      return;
+    }
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+    // 드래그 시작
+    if (isDragging && !tempStartDate) {
+      setTempStartDate(formatted);
+      setTempEndDate(formatted);
+      return;
+    }
+
+    // 드래그 중
+    if (isDragging && tempStartDate) {
+      const [start, end] = sortDates(tempStartDate, formatted);
+      setTempStartDate(start);
+      setTempEndDate(end);
+    }
+  };
+
+  // 확인 버튼 클릭 시 날짜 선택 확인
+  const handleConfirm = () => {
+    if (tempStartDate && tempEndDate) {
+      try {
+        const formattedStartDate = format(new Date(tempStartDate), 'yyyyMMdd');
+        const formattedEndDate = format(new Date(tempEndDate), 'yyyyMMdd');
+
+        console.log('DateRangePicker 날짜 선택 확인');
+        console.log('시작일:', formattedStartDate);
+        console.log('종료일:', formattedEndDate);
+
+        onStartDateChange(formattedStartDate);
+        onEndDateChange(formattedEndDate);
+      } catch (e) {
+        console.error('Date formatting error:', e);
+      }
+    }
+    setIsOpen(false);
+  };
+
+  const selectedRange = tempStartDate && tempEndDate 
+    ? getRange(tempStartDate, tempEndDate)
+    : [];
+
+  function generateMonthDays(date) {
+    const firstDayOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+    const lastDayOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    
+    // 현재 달의 날짜들만 반환
+    return eachDayOfInterval({ 
+      start: firstDayOfMonth, 
+      end: lastDayOfMonth 
+    }).map(day => ({
+      date: day,
+      formatted: format(day, "yyyy-MM-dd")
+    }));
+  }
+
+  const SingleCalendar = ({ 
+    currentMonth, 
+    setCurrentMonth
+  }) => {
+    // 한국 시간 기준으로 tomorrow 설정
+    const tomorrow = startOfDay(addDays(new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Seoul"})), 1));
+    
+    const days = generateMonthDays(currentMonth);
+    const emptyDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
+    
+    // 항상 6주 표시를 위한 계산
+    const totalDays = days.length + emptyDays;
+    const remainingCells = 42 - totalDays; // 6주 x 7일 = 42칸
+
+    // 메인 코드
+    return (
+      <CalendarContainer>
+        <CalendarHeader>
+          <MonthButton onClick={() => setCurrentMonth(prev => addMonths(prev, -1))}>
+            ←
+          </MonthButton>
+          <MonthTitle>{format(currentMonth, "yyyy년 MM월")}</MonthTitle>
+          <MonthButton onClick={() => setCurrentMonth(prev => addMonths(prev, 1))}>
+            →
+          </MonthButton>
+        </CalendarHeader>
+
+        <WeekdayHeader>
+          {['일', '월', '화', '수', '목', '금', '토'].map(day => (
+            <WeekdayCell key={day}>{day}</WeekdayCell>
+          ))}
+        </WeekdayHeader>
+
+        <DaysGrid>
+          {Array.from({ length: emptyDays }).map((_, index) => (
+            <DayCell key={`empty-start-${index}`} isEmpty />
+          ))}
+          
+          {days.map(({ date, formatted }) => {
+            const isSelected = formatted === tempStartDate || formatted === tempEndDate;
+            const isInRange = tempStartDate && tempEndDate && 
+              new Date(formatted) >= new Date(tempStartDate) && 
+              new Date(formatted) <= new Date(tempEndDate);
+            // 내일 이후 날짜만 제한
+            const isDisabled = !isBefore(date, tomorrow);
+
+            return (
+              <DayCell
+                key={formatted}
+                isSelected={isSelected}
+                isInRange={isInRange}
+                isDisabled={isDisabled}
+                onMouseDown={(e) => {
+                  if (!isDisabled) {
+                    e.preventDefault();
+                    setIsDragging(true);
+                    handleDateSelection(formatted);
+                  }
+                }}
+                onMouseEnter={() => {
+                  if (!isDisabled && isDragging) {
+                    handleDateSelection(formatted);
+                  }
+                }}
+                onClick={() => {
+                  if (!isDisabled && !isDragging) {
+                    handleDateSelection(formatted);
+                  }
+                }}
+              >
+                {date.getDate()}
+              </DayCell>
+            );
+          })}
+
+          {Array.from({ length: remainingCells }).map((_, index) => (
+            <DayCell key={`empty-end-${index}`} isEmpty />
+          ))}
+        </DaysGrid>
+      </CalendarContainer>
+    );
+  };
+
+  return (
+    <div ref={calendarRef} style={{ position: 'relative' }}>
+      <DateInput 
+        onClick={() => setIsOpen(!isOpen)}
+        hasValue={startDate || endDate}
+      >
+        {formatDateRange()}
+      </DateInput>
+      
+      {isOpen && (
+        <CalendarPopup isSearchSection={isSearchSection}>
+          <CalendarWrapper
+            onMouseUp={() => setIsDragging(false)}
+            onMouseLeave={() => setIsDragging(false)}
+          >
+            <SingleCalendar
+              currentMonth={currentStartMonth}
+              setCurrentMonth={setCurrentStartMonth}
+            />
+            {!isMobile && (
+              <SingleCalendar
+                currentMonth={currentEndMonth}
+                setCurrentMonth={setCurrentEndMonth}
+              />
+            )}
+          </CalendarWrapper>
+
+          <ButtonContainer>
+            <ConfirmButton onClick={handleConfirm}>
+              확인
+            </ConfirmButton>
+          </ButtonContainer>
+        </CalendarPopup>
+      )}
+    </div>
+  );
+};
+
+export default DateRangePicker; 
