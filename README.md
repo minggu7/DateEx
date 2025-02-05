@@ -536,3 +536,115 @@ const DateRangePicker = ({ startDate, endDate, onStartDateChange, onEndDateChang
 };
 
 export default DateRangePicker; 
+
+
+도커, 쉘스크립트 관련 파일
+
+도커 설명
+
+# 1단계: Node.js 이미지를 기반으로 리액트 앱 빌드
+FROM node:18-alpine AS build
+
+# 작업 디렉토리 설정
+WORKDIR /app
+
+# 비root 사용자 생성
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# package.json 및 package-lock.json 파일을 복사해서 의존성 설치
+COPY package*.json ./
+RUN npm ci --only=production
+
+# 소스 코드 복사 및 리액트 앱 빌드
+COPY . .
+RUN npm run build
+
+# 2단계: 빌드된 리액트 앱을 Node.js로 서빙
+FROM node:18-alpine
+
+WORKDIR /app
+
+# 비root 사용자 생성
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# serve 패키지 설치
+RUN npm install -g serve
+
+# 빌드된 파일을 복사
+COPY --from=build /app/build /app/build
+
+# 사용자 변경
+USER appuser
+
+# 8888 포트 열기
+EXPOSE 8888
+
+# 빌드된 정적 파일을 서빙할 때 8888 포트 사용
+CMD ["serve", "-s", "build", "-l", "8888"]
+
+
+
+쉘스크립트 예시 deploy.sh
+#!/bin/bash
+
+# 색상 정의
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${YELLOW}[1/4] 도커 이미지 빌드 시작...${NC}"
+docker build -t react-app:latest .
+
+echo -e "${YELLOW}[2/4] 기존 컨테이너 제거 중...${NC}"
+docker rm -f react-app || true
+
+echo -e "${YELLOW}[3/4] 새 컨테이너 실행 중...${NC}"
+docker run -d \
+  --name react-app \
+  -p 8888:8888 \
+  --restart unless-stopped \
+  react-app:latest
+
+echo -e "${YELLOW}[4/4] 컨테이너 상태 확인 중...${NC}"
+docker ps | grep react-app
+
+# 컨테이너가 정상적으로 실행되었는지 확인
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}배포가 성공적으로 완료되었습니다!${NC}"
+    echo -e "${GREEN}접속 주소: http://localhost:8888${NC}"
+else
+    echo -e "\033[0;31m배포 중 문제가 발생했습니다. 로그를 확인해주세요.${NC}"
+    docker logs react-app
+    exit 1
+fi 
+
+
+도커 설정파일 setup-docker.sh
+
+#!/bin/bash
+
+# 색상 정의
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo -e "${YELLOW}도커 권한 설정을 시작합니다...${NC}"
+
+# 도커 그룹이 없다면 생성
+if ! getent group docker > /dev/null 2>&1; then
+    echo -e "${YELLOW}도커 그룹 생성 중...${NC}"
+    sudo groupadd docker
+fi
+
+# 현재 사용자를 도커 그룹에 추가
+echo -e "${YELLOW}사용자를 도커 그룹에 추가하는 중...${NC}"
+sudo usermod -aG docker $USER
+
+# 도커 서비스 재시작
+echo -e "${YELLOW}도커 서비스 재시작 중...${NC}"
+sudo systemctl restart docker
+
+echo -e "${GREEN}설정이 완료되었습니다.${NC}"
+echo -e "${YELLOW}변경사항을 적용하기 위해 시스템을 다시 로그인하거나 다음 명령어를 실행하세요:${NC}"
+echo -e "${GREEN}newgrp docker${NC}" 
